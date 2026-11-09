@@ -18,7 +18,7 @@ prompts and pictures never leave it.
 
 - **Create images** from a description: photos, posters, graphic design, text inside the picture.
 - **Edit a picture** by saying what to change ("make it winter"): the rest stays as it was.
-- **Start from a picture**: a new image that keeps its layout and colours, as far from it as you like.
+- **Start from a picture**: a new image that keeps its layout and colors, as far from it as you like.
 - **Make short videos with sound**, from a description or starting from a picture.
 - **Upscale** a picture 2, 3 or 4 times, with sharper detail.
 
@@ -61,7 +61,7 @@ models want more, see the table) and room on the disk for the models you pick.
   order, "the person from the first picture in the jacket from the second".
 - **Image to image.** Z-Image Turbo and Qwen-Image take a *Starting Image* (FLUX.2 Klein too, with
   *Start from It* instead of *Edit It*): the new image grows out of the picture's layout and
-  colours, and the prompt says what it becomes. *Change* sets how far it may move away, as the
+  colors, and the prompt says what it becomes. *Change* sets how far it may move away, as the
   denoising strength of other apps: at 75% it keeps the composition, at 30% it only touches the
   details, and the steps it keeps are skipped, so it is also faster. The picture is stretched to
   the format; *Use Its Proportions* gives the format the picture's. Klein's *Start from It* starts

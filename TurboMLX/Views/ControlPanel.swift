@@ -1397,7 +1397,7 @@ private struct ReferenceImageSection: View {
                         Text("Start from It").tag(true)
                     }
                     .pickerStyle(.segmented)
-                    .help("Edit It: the prompt says what to change, and the rest stays as it was. Start from It: the new image grows out of the picture’s layout and colours, as far from it as Change says.")
+                    .help("Edit It: the prompt says what to change, and the rest stays as it was. Start from It: the new image grows out of the picture’s layout and colors, as far from it as Change says.")
                 }
                 if startsFromImage {
                     ImageChangeRow(settings: $settings)
@@ -1496,14 +1496,14 @@ private struct ImageChangeRow: View {
             HStack(spacing: 6) {
                 SliderIcon("photo", help: "Lower: stays close to the picture, changing its details", label: "Closer")
                 Slider(value: $settings.imageChange, in: GenerationSettings.imageChangeRange, step: 0.05)
-                SliderIcon("wand.and.stars", help: "Higher: follows the prompt, keeping only the picture’s layout and colours", label: "Freer")
+                SliderIcon("wand.and.stars", help: "Higher: follows the prompt, keeping only the picture’s layout and colors", label: "Freer")
                 Text(verbatim: "\(Int((settings.imageChange * 100).rounded()))%")
                     .monospacedDigit()
                     .frame(width: 36, alignment: .trailing)
             }
         } label: {
             Text("Change")
-                .help("How much the new image may change from the picture: at 75% it keeps the layout and colours, at 30% it only touches the details. The steps it keeps are skipped, so a lower Change is also faster.")
+                .help("How much the new image may change from the picture: at 75% it keeps the layout and colors, at 30% it only touches the details. The steps it keeps are skipped, so a lower Change is also faster.")
         }
     }
 }
