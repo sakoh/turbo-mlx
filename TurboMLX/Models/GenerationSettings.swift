@@ -135,6 +135,9 @@ nonisolated struct GenerationSettings: Codable, Equatable, Sendable {
     /// The image a clip starts from, or an image is made from: a file in the references folder
     /// (`HistoryStore`).
     var referenceImage: String?
+    /// The pictures after it, in order, for the models that read several (`ModelFamily.maxReferenceImages`),
+    /// in the same folder. A model that reads fewer keeps them here and gets only its own.
+    var moreReferenceImages: [String] = []
     /// The image a clip ends on (`ModelFamily.takesLastFrame`), in the same folder.
     var lastFrameImage: String?
     /// Upscalers: the factor, and how much the picture is softened before it is enlarged (0–1),
@@ -213,6 +216,12 @@ nonisolated struct GenerationSettings: Codable, Equatable, Sendable {
         videoQuality && model.family.isLTX
     }
 
+    /// The reference images `family` reads, in order: the first, then as many more as it takes.
+    func referenceImages(for family: ModelFamily) -> [String] {
+        guard family.takesReferenceImage, let referenceImage else { return [] }
+        return [referenceImage] + moreReferenceImages.prefix(family.maxReferenceImages - 1)
+    }
+
     func loras(for family: ModelFamily) -> [LoRAChoice] {
         guard family.takesLoRAs, let first = loras[family.rawValue] else { return [] }
         return [first] + (moreLoRAs[family.rawValue] ?? [])
@@ -249,7 +258,7 @@ nonisolated struct GenerationSettings: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case blocks, negativePrompt, aspect, resolution, usesCustomSize, customWidth, customHeight, steps, guidance,
              randomSeed, seed, batchCount, transparentBackground, lowMemory,
-             videoResolution, videoSeconds, videoFrameRate, videoAutoDuration, referenceImage, lastFrameImage, upscale, softness,
+             videoResolution, videoSeconds, videoFrameRate, videoAutoDuration, referenceImage, moreReferenceImages, lastFrameImage, upscale, softness,
              halfPrecision, livePreview, loras, moreLoRAs, videoQuality, gaussians, objectMode, lyrics, instrumental, songSeconds, soundSeconds
     }
 
@@ -284,6 +293,7 @@ nonisolated struct GenerationSettings: Codable, Equatable, Sendable {
         videoFrameRate = try values.decodeIfPresent(Int.self, forKey: .videoFrameRate) ?? videoFrameRate
         videoAutoDuration = try values.decodeIfPresent(Bool.self, forKey: .videoAutoDuration) ?? videoAutoDuration
         referenceImage = try values.decodeIfPresent(String.self, forKey: .referenceImage)
+        moreReferenceImages = try values.decodeIfPresent([String].self, forKey: .moreReferenceImages) ?? moreReferenceImages
         lastFrameImage = try values.decodeIfPresent(String.self, forKey: .lastFrameImage)
         upscale = try values.decodeIfPresent(Double.self, forKey: .upscale) ?? upscale
         softness = try values.decodeIfPresent(Double.self, forKey: .softness) ?? softness
@@ -377,6 +387,8 @@ nonisolated struct GenerationRequest: Codable, Hashable, Sendable {
     var autoDuration: Bool?
     /// Video only: the image the clip starts from, a file in the references folder.
     var referenceImage: String?
+    /// The pictures after it, in order, for the models that read several; nil with one or none.
+    var moreReferenceImages: [String]?
     /// LTX only: the image the clip ends on, in the same folder.
     var lastFrameImage: String?
     /// Upscalers only: the factor and the softening (`GenerationSettings`).
@@ -399,6 +411,9 @@ nonisolated struct GenerationRequest: Codable, Hashable, Sendable {
     var lyrics: String?
     var duration: Double?
 
+    /// Every reference image, in order.
+    var referenceImages: [String] { referenceImage.map { [$0] + (moreReferenceImages ?? []) } ?? [] }
+
     /// What to show for it: the prompt, for an upscale what it did ("Upscaled 2×"), for an object its detail.
     var caption: String {
         if let numGaussians { return "3D object, \(ObjectDetail.label(numGaussians)) Gaussians" }
@@ -413,7 +428,7 @@ nonisolated struct GenerationRequest: Codable, Hashable, Sendable {
 nonisolated extension GenerationRequest {
     private enum CodingKeys: String, CodingKey {
         case prompt, blocks, negativePrompt, seed, size, steps, guidance, transparentBackground, lowMemory, frames, fps,
-             autoDuration, referenceImage, lastFrameImage, upscale, softness, halfPrecision, loras, quality, numGaussians,
+             autoDuration, referenceImage, moreReferenceImages, lastFrameImage, upscale, softness, halfPrecision, loras, quality, numGaussians,
              objectMode, lyrics, duration
     }
 
@@ -433,6 +448,7 @@ nonisolated extension GenerationRequest {
         fps = try values.decodeIfPresent(Int.self, forKey: .fps)
         autoDuration = try values.decodeIfPresent(Bool.self, forKey: .autoDuration)
         referenceImage = try values.decodeIfPresent(String.self, forKey: .referenceImage)
+        moreReferenceImages = try values.decodeIfPresent([String].self, forKey: .moreReferenceImages)
         lastFrameImage = try values.decodeIfPresent(String.self, forKey: .lastFrameImage)
         upscale = try values.decodeIfPresent(Double.self, forKey: .upscale)
         softness = try values.decodeIfPresent(Double.self, forKey: .softness)
@@ -460,6 +476,7 @@ nonisolated extension GenerationRequest {
         try values.encodeIfPresent(fps, forKey: .fps)
         try values.encodeIfPresent(autoDuration, forKey: .autoDuration)
         try values.encodeIfPresent(referenceImage, forKey: .referenceImage)
+        try values.encodeIfPresent(moreReferenceImages, forKey: .moreReferenceImages)
         try values.encodeIfPresent(lastFrameImage, forKey: .lastFrameImage)
         try values.encodeIfPresent(upscale, forKey: .upscale)
         try values.encodeIfPresent(softness, forKey: .softness)

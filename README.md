@@ -52,10 +52,12 @@ models want more, see the table) and room on the disk for the models you pick.
 - **Shape and size.** The aspect ratio and the resolution (a bigger picture takes longer) and,
   for the models that use it, *Guidance*: how closely the picture follows the prompt.
 - **A starting picture.** Models that can use one show a *Reference Image* box above the prompt:
-  drop a picture there from Finder or from the history. Image models change it as the prompt
+  drop a picture there from Finder or from the history, or paste one. Image models change it as the prompt
   says; video models use it as the first frame of the clip, and LTX also takes a last frame: give
   it both and the prompt says how the clip gets from one to the other. Qwen-Image Edit always
-  needs one.
+  needs one. FLUX.2 Klein, FLUX 3 Image Klein and Qwen-Image Edit read several (up to 4, 10 and
+  3): once one is in, a box for the next appears under it, and the prompt names them by their
+  order, "the person from the first picture in the jacket from the second".
 - **Videos.** Choose the duration and the frame rate, or let LTX-2.5 pick the length the prompt
   describes. *Fast* runs the distilled model (8 steps, a few minutes for 5 seconds); *Quality*
   runs the full model with guidance and a *Negative Prompt* (30 steps of four passes each, about
@@ -122,6 +124,7 @@ models want more, see the table) and room on the disk for the models you pick.
 | Compare an edit or an upscale with its original | ⌥⌘C, then drag the line |
 | Use a picture’s prompt and settings | ⇧⌘O, or drop it on the prompt |
 | Undo a change to the settings | ⌘Z |
+| Paste a picture as a reference image | ⌘V, the pointer over its box or after a click on it |
 | Settings / Engine Log | ⌘, / ⌥⌘L |
 
 ## Models
