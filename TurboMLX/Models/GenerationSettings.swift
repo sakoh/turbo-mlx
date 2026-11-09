@@ -111,6 +111,9 @@ nonisolated struct GenerationSettings: Codable, Equatable, Sendable {
     static let songDurations = 10.0...360.0
     /// A sound effect's length, in seconds: MOSS-SoundEffect makes up to 30, in tenths.
     static let soundDurations = 0.5...30.0
+    /// How much an image may change from the picture it starts from: at least one step is always
+    /// skipped and run, so the ends would only give the picture back or ignore it.
+    static let imageChangeRange = 0.05...0.95
 
     var blocks = PromptBlock.defaults()
     /// What the image should not have, for the models that take it (`supportsNegativePrompt`).
@@ -140,6 +143,12 @@ nonisolated struct GenerationSettings: Codable, Equatable, Sendable {
     var moreReferenceImages: [String] = []
     /// The image a clip ends on (`ModelFamily.takesLastFrame`), in the same folder.
     var lastFrameImage: String?
+    /// Image to image (`ModelFamily.startsFromImage`): how much the new image may change from the
+    /// reference picture, as A1111 and InvokeAI's denoising strength (0.75 by default there too).
+    /// The engine takes the part kept, mflux's image strength (`imageStrength(for:)`).
+    var imageChange = 0.75
+    /// FLUX.2 Klein, which can do either: start from the reference picture instead of editing it.
+    var startsFromReference = false
     /// Upscalers: the factor, and how much the picture is softened before it is enlarged (0–1),
     /// which gives smoother results from a noisy or over-sharpened picture.
     var upscale = 2.0
@@ -216,10 +225,25 @@ nonisolated struct GenerationSettings: Codable, Equatable, Sendable {
         videoQuality && model.family.isLTX
     }
 
-    /// The reference images `family` reads, in order: the first, then as many more as it takes.
+    /// The reference images `family` reads, in order: the first, then as many more as it takes. An
+    /// image that starts from a picture (`startsFromImage(for:)`) starts from the first alone.
     func referenceImages(for family: ModelFamily) -> [String] {
         guard family.takesReferenceImage, let referenceImage else { return [] }
-        return [referenceImage] + moreReferenceImages.prefix(family.maxReferenceImages - 1)
+        let limit = startsFromImage(for: family) ? 1 : family.maxReferenceImages
+        return [referenceImage] + moreReferenceImages.prefix(limit - 1)
+    }
+
+    /// Whether an image of `family` starts from the reference picture rather than editing it: always
+    /// for the families that only start from one, for FLUX.2 Klein when asked to.
+    func startsFromImage(for family: ModelFamily) -> Bool {
+        family.startsFromImage && (startsFromReference || !family.editsReference)
+    }
+
+    /// What the engine keeps of the reference picture (`GenerationRequest.imageStrength`), in
+    /// hundredths: nil without a picture, or when `family` edits it instead.
+    func imageStrength(for family: ModelFamily) -> Double? {
+        guard referenceImage != nil, startsFromImage(for: family) else { return nil }
+        return ((1 - imageChange) * 100).rounded() / 100
     }
 
     func loras(for family: ModelFamily) -> [LoRAChoice] {
@@ -259,7 +283,8 @@ nonisolated struct GenerationSettings: Codable, Equatable, Sendable {
         case blocks, negativePrompt, aspect, resolution, usesCustomSize, customWidth, customHeight, steps, guidance,
              randomSeed, seed, batchCount, transparentBackground, lowMemory,
              videoResolution, videoSeconds, videoFrameRate, videoAutoDuration, referenceImage, moreReferenceImages, lastFrameImage, upscale, softness,
-             halfPrecision, livePreview, loras, moreLoRAs, videoQuality, gaussians, objectMode, lyrics, instrumental, songSeconds, soundSeconds
+             halfPrecision, livePreview, loras, moreLoRAs, videoQuality, gaussians, objectMode, lyrics, instrumental, songSeconds, soundSeconds,
+             imageChange, startsFromReference
     }
 
     /// Settings saved before the prompt had blocks kept a single string.
@@ -309,6 +334,8 @@ nonisolated struct GenerationSettings: Codable, Equatable, Sendable {
         instrumental = try values.decodeIfPresent(Bool.self, forKey: .instrumental) ?? instrumental
         songSeconds = try values.decodeIfPresent(Double.self, forKey: .songSeconds) ?? songSeconds
         soundSeconds = try values.decodeIfPresent(Double.self, forKey: .soundSeconds) ?? soundSeconds
+        imageChange = try values.decodeIfPresent(Double.self, forKey: .imageChange) ?? imageChange
+        startsFromReference = try values.decodeIfPresent(Bool.self, forKey: .startsFromReference) ?? startsFromReference
     }
 
     /// Seeds for the next batch: consecutive from the fixed seed, or fresh random ones.
@@ -391,6 +418,9 @@ nonisolated struct GenerationRequest: Codable, Hashable, Sendable {
     var moreReferenceImages: [String]?
     /// LTX only: the image the clip ends on, in the same folder.
     var lastFrameImage: String?
+    /// Image to image: how much of `referenceImage` the image kept (mflux's image strength, one minus
+    /// the change asked); nil when the picture was edited from, or there was none.
+    var imageStrength: Double?
     /// Upscalers only: the factor and the softening (`GenerationSettings`).
     var upscale: Double?
     var softness: Double?
@@ -423,13 +453,27 @@ nonisolated struct GenerationRequest: Codable, Hashable, Sendable {
         let softened = (softness ?? 0) > 0 ? ", softened \(Int(((softness ?? 0) * 100).rounded()))%" : ""
         return "Upscaled \(factor)×\(softened)"
     }
+
+    /// The steps the engine runs: an image that starts from a picture skips the first ones.
+    var denoisingSteps: Int { Self.denoisingSteps(steps, imageStrength: referenceImage == nil ? nil : imageStrength) }
+
+    /// The reference pictures, unless the image started from one: an edit reads them in every step,
+    /// a start reads its picture only once.
+    var editedPictures: [String] { imageStrength == nil ? referenceImages : [] }
+
+    /// `steps` less those an image that starts from a picture skips: mflux's `init_time_step`,
+    /// `max(1, floor(steps · strength))` (`ImageToImage.startStep` in the engine).
+    static func denoisingSteps(_ steps: Int, imageStrength: Double?) -> Int {
+        guard let imageStrength, imageStrength > 0 else { return steps }
+        return steps - max(1, Int(Double(steps) * min(1, imageStrength)))
+    }
 }
 
 nonisolated extension GenerationRequest {
     private enum CodingKeys: String, CodingKey {
         case prompt, blocks, negativePrompt, seed, size, steps, guidance, transparentBackground, lowMemory, frames, fps,
-             autoDuration, referenceImage, moreReferenceImages, lastFrameImage, upscale, softness, halfPrecision, loras, quality, numGaussians,
-             objectMode, lyrics, duration
+             autoDuration, referenceImage, moreReferenceImages, lastFrameImage, imageStrength, upscale, softness, halfPrecision, loras,
+             quality, numGaussians, objectMode, lyrics, duration
     }
 
     init(from decoder: any Decoder) throws {
@@ -450,6 +494,7 @@ nonisolated extension GenerationRequest {
         referenceImage = try values.decodeIfPresent(String.self, forKey: .referenceImage)
         moreReferenceImages = try values.decodeIfPresent([String].self, forKey: .moreReferenceImages)
         lastFrameImage = try values.decodeIfPresent(String.self, forKey: .lastFrameImage)
+        imageStrength = try values.decodeIfPresent(Double.self, forKey: .imageStrength)
         upscale = try values.decodeIfPresent(Double.self, forKey: .upscale)
         softness = try values.decodeIfPresent(Double.self, forKey: .softness)
         halfPrecision = try values.decodeIfPresent(Bool.self, forKey: .halfPrecision)
@@ -478,6 +523,7 @@ nonisolated extension GenerationRequest {
         try values.encodeIfPresent(referenceImage, forKey: .referenceImage)
         try values.encodeIfPresent(moreReferenceImages, forKey: .moreReferenceImages)
         try values.encodeIfPresent(lastFrameImage, forKey: .lastFrameImage)
+        try values.encodeIfPresent(imageStrength, forKey: .imageStrength)
         try values.encodeIfPresent(upscale, forKey: .upscale)
         try values.encodeIfPresent(softness, forKey: .softness)
         try values.encodeIfPresent(halfPrecision, forKey: .halfPrecision)

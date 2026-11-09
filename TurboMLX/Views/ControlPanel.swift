@@ -144,7 +144,10 @@ private struct ModelSelection: View {
             ModelPopUp.Entry(
                 id: model.id, name: model.shortName != model.name ? model.shortName : model.name,
                 badge: model.shortName != model.name ? model.memoryLabel : nil,
-                icon: ModelIcon.image(takesPicture: model.family.takesReferenceImage, installed: app.isInstalled(model)),
+                // Starting from a picture is an option of models made for text: they keep the text icon.
+                icon: ModelIcon.image(takesPicture: model.family.takesReferenceImage
+                                          && (model.family.editsReference || !model.family.startsFromImage),
+                                      installed: app.isInstalled(model)),
                 installed: app.isInstalled(model)
             )
         }
@@ -1276,9 +1279,11 @@ private struct Reordering {
 /// The image a clip starts from, or an image is made from: dropped from Finder or from the history
 /// strip, chosen with the open panel, pasted, or picked among the generated images. A clip takes it
 /// as its first frame and the prompt says what happens next, and LTX a second one as its last frame;
-/// FLUX.2 Klein and Qwen-Image Edit change it as the prompt says. The models that read several
-/// pictures (`ModelFamily.maxReferenceImages`) show an empty slot under the last one, up to their
-/// limit; the prompt tells the pictures apart by their order.
+/// FLUX.2 Klein and Qwen-Image Edit change it as the prompt says; Z-Image, Qwen-Image and, when
+/// asked, FLUX.2 Klein start the new image from it (image to image), as far from it as Change says.
+/// The models that read several pictures (`ModelFamily.maxReferenceImages`) show an empty slot under
+/// the last one, up to their limit, unless the image starts from the first; the prompt tells the
+/// pictures apart by their order.
 private struct ReferenceImageSection: View {
     @Environment(AppModel.self) private var app
     @Binding var settings: GenerationSettings
@@ -1287,8 +1292,13 @@ private struct ReferenceImageSection: View {
     private var isVideo: Bool { app.selectedModel?.family.media == .video }
     private var isUpscaler: Bool { app.selectedModel?.family.isUpscaler == true }
     private var takesLastFrame: Bool { app.selectedModel?.family.takesLastFrame == true }
+    /// The new image starts from the picture rather than editing it.
+    private var startsFromImage: Bool { app.selectedModel.map { settings.startsFromImage(for: $0.family) } ?? false }
     /// How many pictures the model reads: one for most.
-    private var limit: Int { app.selectedModel?.family.maxReferenceImages ?? 1 }
+    private var maxPictures: Int { app.selectedModel?.family.maxReferenceImages ?? 1 }
+    /// How many slots show: one when the image starts from the picture, which the engine does
+    /// from the first alone (`GenerationSettings.referenceImages(for:)`).
+    private var limit: Int { startsFromImage ? 1 : maxPictures }
 
     private var caption: String {
         if isVideo, takesLastFrame {
@@ -1307,6 +1317,9 @@ private struct ReferenceImageSection: View {
         }
         if app.selectedModel?.family == .senseNova {
             return "Optional. It keeps its own proportions, at about the new image’s size (at least 512 × 512 pixels); the new image takes the format below."
+        }
+        if startsFromImage {
+            return "Optional. It is stretched to the format below, and the prompt says what it becomes: Change sets how far the new image may move away from it."
         }
         return "Optional. It keeps its own proportions, at most about a megapixel; the new image takes the format below."
     }
@@ -1333,8 +1346,24 @@ private struct ReferenceImageSection: View {
                     panelMessage: "Choose the image the clip ends on", failure: $failure
                 )
             }
+            if let family = app.selectedModel?.family, family.startsFromImage, settings.referenceImage != nil {
+                // FLUX.2 Klein can do either; editing stays its default.
+                if family.editsReference {
+                    Picker("Use It To", selection: $settings.startsFromReference) {
+                        Text("Edit It").tag(false)
+                        Text("Start from It").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                    .help("Edit It: the prompt says what to change, and the rest stays as it was. Start from It: the new image grows out of the picture’s layout and colours, as far from it as Change says.")
+                }
+                if startsFromImage {
+                    ImageChangeRow(settings: $settings)
+                    ProportionsHint(settings: $settings, family: family)
+                }
+            }
         } header: {
-            Text(isUpscaler ? "Picture to Upscale" : takesLastFrame ? "First and Last Frames" : limit > 1 ? "Reference Images" : "Reference Image")
+            Text(isUpscaler ? "Picture to Upscale" : takesLastFrame ? "First and Last Frames" : startsFromImage ? "Starting Image"
+                 : limit > 1 ? "Reference Images" : "Reference Image")
         } footer: {
             if let failure {
                 Text(failure).font(.caption).foregroundStyle(.red)
@@ -1346,8 +1375,9 @@ private struct ReferenceImageSection: View {
         }
     }
 
-    /// The first picture. Removed, the next one takes its place; on a model that reads one picture
-    /// the others, which it does not show, go with it.
+    /// The first picture. Removed, the next one takes its place (also while the image starts from the
+    /// first alone, which shows no other); on a model that reads one picture the others, which it
+    /// does not show, go with it.
     private var first: Binding<String?> {
         Binding {
             settings.referenceImage
@@ -1355,7 +1385,7 @@ private struct ReferenceImageSection: View {
             // One write: through the binding, each separate one would start from the same old
             // settings and only the last would stay.
             var updated = settings
-            if name == nil, limit > 1, !updated.moreReferenceImages.isEmpty {
+            if name == nil, maxPictures > 1, !updated.moreReferenceImages.isEmpty {
                 updated.referenceImage = updated.moreReferenceImages.removeFirst()
             } else {
                 updated.referenceImage = name
@@ -1397,15 +1427,82 @@ private struct ReferenceImageSection: View {
         return switch (settings.referenceImage == nil, isVideo, isUpscaler) {
         case (true, true, _): "Drop an image here, or pick one: the clip starts from it."
         case (true, _, true): "Drop an image here, or pick one: it comes out larger, with sharper detail."
+        case (true, _, _) where startsFromImage: "Drop an image here, or pick one: the new image starts from it."
         case (true, _, _): "Drop an image here, or pick one: the prompt says what to change in it."
         case (false, true, _): "The clip starts from this image."
         case (false, _, true): "This picture is upscaled."
+        case (false, _, _) where startsFromImage: "The new image starts from this one, as the prompt says."
         case (false, _, _): "The new image is made from this one, as the prompt says."
         }
     }
 
     private var panelMessage: String {
-        isUpscaler ? "Choose the picture to upscale" : isVideo ? "Choose the image the clip starts from" : "Choose the reference image"
+        isUpscaler ? "Choose the picture to upscale" : isVideo ? "Choose the image the clip starts from"
+            : startsFromImage ? "Choose the image to start from" : "Choose the reference image"
+    }
+}
+
+/// Image to image: how far the new image may move away from its starting picture, as A1111 and
+/// InvokeAI's denoising strength. Few-step models change in steps of a step: Z-Image's 9 steps make
+/// 80% and 85% the same image.
+private struct ImageChangeRow: View {
+    @Binding var settings: GenerationSettings
+
+    var body: some View {
+        LabeledContent {
+            HStack(spacing: 6) {
+                SliderIcon("photo", help: "Lower: stays close to the picture, changing its details", label: "Closer")
+                Slider(value: $settings.imageChange, in: GenerationSettings.imageChangeRange, step: 0.05)
+                SliderIcon("wand.and.stars", help: "Higher: follows the prompt, keeping only the picture’s layout and colours", label: "Freer")
+                Text(verbatim: "\(Int((settings.imageChange * 100).rounded()))%")
+                    .monospacedDigit()
+                    .frame(width: 36, alignment: .trailing)
+            }
+        } label: {
+            Text("Change")
+                .help("How much the new image may change from the picture: at 75% it keeps the layout and colours, at 30% it only touches the details. The steps it keeps are skipped, so a lower Change is also faster.")
+        }
+    }
+}
+
+/// The picture is stretched to the image's format, as A1111's "Just resize" and mflux do: when
+/// their proportions differ, a line says so, with a button that gives the image the picture's.
+private struct ProportionsHint: View {
+    @Binding var settings: GenerationSettings
+    let family: ModelFamily
+
+    var body: some View {
+        if let name = settings.referenceImage, let picture = ReferencePicture.size(name) {
+            let size = settings.size(for: family)
+            let pictureRatio = Double(picture.width) / Double(picture.height)
+            let imageRatio = Double(size.width) / Double(size.height)
+            // A few percent is what snapping the sides to multiples of 16 leaves.
+            if abs(pictureRatio / imageRatio - 1) > 0.03 {
+                HStack(spacing: 8) {
+                    Text(verbatim: "The picture is \(picture.width) × \(picture.height): it will be stretched to \(size.width) × \(size.height).")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                    Button("Use Its Proportions") { useProportions(of: picture, from: size) }
+                        .controlSize(.small)
+                        .help("Change the format to the picture’s proportions, with about as many pixels as now")
+                }
+            }
+        }
+    }
+
+    /// The picture's proportions at about the area of the current format: a preset if one gives
+    /// that size, else a custom size.
+    private func useProportions(of picture: PixelSize, from size: PixelSize) {
+        let area = Double(size.width * size.height)
+        let ratio = Double(picture.width) / Double(picture.height)
+        let multiple = family.sizeMultiple
+        settings.apply(
+            size: PixelSize(width: PixelSize.snapped((area * ratio).squareRoot(), multiple: multiple),
+                            height: PixelSize.snapped((area / ratio).squareRoot(), multiple: multiple)),
+            multiple: multiple
+        )
     }
 }
 
@@ -2420,14 +2517,18 @@ private struct GenerateBar: View {
     private var estimate: TimeEstimate.Result? {
         guard let model = app.selectedModel else { return nil }
         let settings = app.settings
+        // An image that starts from the picture skips its first steps, and reads it only once.
+        let strength = model.family.takesReferenceImage ? settings.imageStrength(for: model.family) : nil
         return TimeEstimate.estimate(
             model: model,
             size: settings.size(for: model.family),
-            steps: min(max(settings.steps, model.stepRange(quality: settings.fullPipeline(for: model)).lowerBound),
-                       model.stepRange(quality: settings.fullPipeline(for: model)).upperBound),
+            steps: GenerationRequest.denoisingSteps(
+                min(max(settings.steps, model.stepRange(quality: settings.fullPipeline(for: model)).lowerBound),
+                    model.stepRange(quality: settings.fullPipeline(for: model)).upperBound),
+                imageStrength: strength),
             guidance: settings.guidance,
             frames: model.family.media == .video ? settings.videoFrames : nil,
-            references: settings.referenceImages(for: model.family),
+            references: strength == nil ? settings.referenceImages(for: model.family) : [],
             lastFrame: model.family.takesLastFrame && settings.lastFrameImage != nil,
             lowMemory: settings.lowMemory,
             halfPrecision: model.family.supportsHalfPrecision && settings.halfPrecision,

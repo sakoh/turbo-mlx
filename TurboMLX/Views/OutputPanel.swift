@@ -476,7 +476,11 @@ private struct ItemInfoBar: View {
                     }
                     if item.request.upscale == nil {
                         let pictures = item.request.referenceImages.count
-                        if pictures > 1 {
+                        if pictures > 0, let strength = item.request.imageStrength {
+                            // Image to image: how much of the picture could change, as it was asked.
+                            MetadataChip(systemImage: "photo", text: "From an image, \(Int(((1 - strength) * 100).rounded()))% changed",
+                                         help: "Started from a reference image, keeping \(Int((strength * 100).rounded()))% of it (image strength \(strength.formatted()))")
+                        } else if pictures > 1 {
                             MetadataChip(systemImage: "photo.stack", text: "From \(pictures) images", help: "Made from \(pictures) reference images")
                         } else if pictures == 1 {
                             MetadataChip(systemImage: "photo", text: "From an image",
@@ -553,7 +557,10 @@ struct HistoryItemMenu: View {
     var body: some View {
         if let selected = app.selectedModel, selected.family.takesReferenceImage, !selected.family.isUpscaler, item.kind != .model3D,
            item.kind != .audio {
-            Button(selected.family.takesLastFrame ? "Use as First Frame" : "Use as Reference Image") { app.useAsReference(item) }
+            Button(selected.family.takesLastFrame ? "Use as First Frame"
+                   : app.settings.startsFromImage(for: selected.family) ? "Use as Starting Image" : "Use as Reference Image") {
+                app.useAsReference(item)
+            }
             if selected.family.takesLastFrame {
                 Button("Use as Last Frame") { app.useAsReference(item, lastFrame: true) }
             }
